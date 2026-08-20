@@ -1,364 +1,324 @@
-// ==========================================
+// =======================================================================
 // CONFIGURATION
-// ==========================================
-// Paste your Groq API key here
-const GROQ_API_KEY = "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"; 
+// =======================================================================
 
-// ==========================================
-// STATE MANAGEMENT
-// ==========================================
-let quizData = null;
-let currentQuestionIndex = 0;
-let userAnswers = [];
+// For demo/local use only.
+// Never expose production API keys in frontend code.
+const GROQ_API_KEY = "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";
 
-// ==========================================
-// DOM ELEMENTS
-// ==========================================
+// =======================================================================
+// STATE & DOM ELEMENTS
+// =======================================================================
+
+let quizState = {
+    title: "",
+    questions: [],
+    currentIndex: 0,
+    score: 0,
+    userAnswers: []
+};
+
+// DOM Cache
 const screens = {
     setup: document.getElementById('setup-screen'),
     loading: document.getElementById('loading-screen'),
-    error: document.getElementById('error-screen'),
     quiz: document.getElementById('quiz-screen'),
-    results: document.getElementById('results-screen')
+    result: document.getElementById('result-screen')
 };
 
-// Setup Inputs
-const inputTopic = document.getElementById('topic');
-const selectDifficulty = document.getElementById('difficulty');
-const selectCount = document.getElementById('questionCount');
-const btnGenerate = document.getElementById('btn-generate');
-
-// Quiz Elements
-const progressText = document.getElementById('progress-text');
-const progressBar = document.getElementById('progress-bar');
-const questionText = document.getElementById('question-text');
-const optionsContainer = document.getElementById('options-container');
-const btnPrev = document.getElementById('btn-prev');
-const btnNext = document.getElementById('btn-next');
-const btnSubmit = document.getElementById('btn-submit');
-
-// Error Elements
+const setupForm = document.getElementById('setup-form');
+const generateBtn = document.getElementById('generate-btn');
+const errorToast = document.getElementById('error-toast');
 const errorMessage = document.getElementById('error-message');
-const btnErrorBack = document.getElementById('btn-error-back');
+const closeErrorBtn = document.getElementById('close-error');
 
-// Result Elements
-const scorePercentage = document.getElementById('score-percentage');
-const scoreFraction = document.getElementById('score-fraction');
-const scoreMessage = document.getElementById('score-message');
-const statCorrect = document.getElementById('stat-correct');
-const statWrong = document.getElementById('stat-wrong');
-const reviewContainer = document.getElementById('review-container');
-const btnRetake = document.getElementById('btn-retake');
-const btnNew = document.getElementById('btn-new');
+const nextBtn = document.getElementById('next-btn');
+const optionsContainer = document.getElementById('options-container');
+const explanationText = document.getElementById('explanation-text');
 
-// ==========================================
+// =======================================================================
 // EVENT LISTENERS
-// ==========================================
-btnGenerate.addEventListener('click', handleGenerateClick);
-btnPrev.addEventListener('click', previousQuestion);
-btnNext.addEventListener('click', nextQuestion);
-btnSubmit.addEventListener('click', submitQuiz);
-btnErrorBack.addEventListener('click', newQuiz);
-btnRetake.addEventListener('click', resetQuiz);
-btnNew.addEventListener('click', newQuiz);
+// =======================================================================
 
-// ==========================================
-// NAVIGATION & UI
-// ==========================================
-function switchScreen(screenName) {
-    Object.values(screens).forEach(screen => screen.classList.remove('active'));
-    screens[screenName].classList.add('active');
-}
+setupForm.addEventListener('submit', handleGenerateQuiz);
+nextBtn.addEventListener('click', nextQuestion);
+document.getElementById('restart-btn').addEventListener('click', restartQuiz);
+closeErrorBtn.addEventListener('click', hideError);
 
-function showError(message) {
-    errorMessage.textContent = message;
-    switchScreen('error');
-}
+// =======================================================================
+// CORE FUNCTIONS
+// =======================================================================
 
-// ==========================================
-// API & GENERATION
-// ==========================================
-async function handleGenerateClick() {
-    const topic = inputTopic.value.trim();
+async function handleGenerateQuiz(e) {
+    e.preventDefault();
+    hideError();
+
+    const topic = document.getElementById('topic').value.trim();
+    const numQuestions = document.getElementById('num-questions').value;
+    const difficulty = document.getElementById('difficulty').value;
+
     if (!topic) {
-        showError("Please enter a topic to generate a quiz.");
+        showError("Please enter a quiz topic.");
         return;
     }
-    
-    if (GROQ_API_KEY === "YOUR_GROQ_API_KEY_HERE" || !GROQ_API_KEY) {
-        showError("Missing API Key. Please add your Groq API key in script.js.");
+    if (!GROQ_API_KEY || GROQ_API_KEY === "YOUR_GROQ_API_KEY") {
+        showError("Please configure your Groq API Key in script.js");
         return;
     }
-
-    const difficulty = selectDifficulty.value;
-    const count = parseInt(selectCount.value, 10);
 
     switchScreen('loading');
-    
+
     try {
-        const response = await fetchGroqCompletion(topic, difficulty, count);
-        const parsedData = parseJSONResponse(response);
+        const quizData = await fetchQuizFromGroq(topic, numQuestions, difficulty);
         
-        if (!validateQuizData(parsedData, count)) {
-            throw new Error("AI generated an invalid quiz structure.");
+        if (!validateQuizData(quizData, parseInt(numQuestions))) {
+            throw new Error("AI returned malformed or incomplete quiz data.");
         }
-        
-        quizData = parsedData;
-        resetQuiz();
+
+        initializeQuiz(quizData);
     } catch (error) {
-        console.error(error);
-        showError(error.message || "An unexpected error occurred while contacting the AI.");
+        console.error("Quiz Generation Error:", error);
+        switchScreen('setup');
+        showError(error.message || "Failed to generate quiz. Please try again.");
     }
 }
 
-async function fetchGroqCompletion(topic, difficulty, count) {
-    const systemPrompt = `You are an expert quiz generator. Generate high-quality multiple-choice quizzes based on the user's requested topic, difficulty, and number of questions.
-
-Rules:
-1. Generate exactly the requested number of questions.
-2. Every question must have exactly 4 options.
-3. Each option must be unique.
-4. Only one option can be correct.
-5. Questions must be factually accurate.
-6. Match the requested difficulty.
-7. Questions must be directly related to the requested topic.
-8. Avoid duplicate or extremely similar questions.
-9. Include a short explanation for every correct answer.
-10. Do not reveal the correct answer outside the JSON structure.
-11. Return ONLY valid JSON.
-12. Do not use Markdown.
-13. Do not include \`\`\`json or code fences.
-
-Return this exact structure:
+async function fetchQuizFromGroq(topic, numQuestions, difficulty) {
+    const url = "https://api.groq.com/openai/v1/chat/completions";
+    
+    // Rigid prompt to force valid JSON output
+    const systemPrompt = `You are an expert AI quiz generator. 
+You must generate exactly ${numQuestions} multiple-choice questions on the topic: "${topic}" at a "${difficulty}" difficulty level.
+You must return ONLY a raw, valid JSON object. Do NOT wrap it in markdown code blocks. Do not add any conversational text.
+Each question MUST have exactly 4 options.
+The "answer" field MUST be an integer (0, 1, 2, or 3) representing the index of the correct option.
+Use this exact JSON structure:
 {
-  "title": "string",
-  "topic": "string",
-  "difficulty": "string",
+  "quizTitle": "A catchy title for the quiz",
   "questions": [
     {
-      "question": "string",
-      "options": [
-        "string",
-        "string",
-        "string",
-        "string"
-      ],
-      "correctAnswer": 0,
-      "explanation": "string"
+      "question": "Question text?",
+      "options": ["Option 1", "Option 2", "Option 3", "Option 4"],
+      "answer": 0,
+      "explanation": "Short explanation of the correct answer."
     }
   ]
-}
+}`;
 
-The correctAnswer value must be the zero-based index of the correct option.`;
+    const payload = {
+        model: "openai/gpt-oss-120b",
+        messages: [
+            { role: "system", content: systemPrompt },
+            { role: "user", content: "Generate the JSON quiz now." }
+        ],
+        temperature: 0.3,
+    };
 
-    const userPrompt = `Topic: ${topic}\nDifficulty: ${difficulty}\nNumber of Questions: ${count}`;
-
-    const res = await fetch("https://api.groq.com/openai/v1/chat/completions", {
-        method: "POST",
+    const response = await fetch(url, {
+        method: 'POST',
         headers: {
-            "Content-Type": "application/json",
-            "Authorization": `Bearer ${GROQ_API_KEY}`
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${GROQ_API_KEY}`
         },
-        body: JSON.stringify({
-            model: "openai/gpt-oss-120b",
-            messages: [
-                { role: "system", content: systemPrompt },
-                { role: "user", content: userPrompt }
-            ],
-            temperature: 0.7
-        })
+        body: JSON.stringify(payload)
     });
 
-    if (!res.ok) {
-        throw new Error(`API Error: ${res.status} ${res.statusText}`);
+    if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}));
+        throw new Error(errorData.error?.message || `API Error: ${response.status}`);
     }
 
-    const data = await res.json();
-    return data.choices[0].message.content;
-}
+    const data = await response.json();
+    let content = data.choices[0]?.message?.content;
+    
+    // Clean up potential markdown formatting from AI
+    if (content) {
+        content = content.replace(/```json/gi, '').replace(/```/gi, '').trim();
+    }
 
-function parseJSONResponse(text) {
-    let cleaned = text.trim();
-    if (cleaned.startsWith('```json')) cleaned = cleaned.replace(/^```json/, '');
-    else if (cleaned.startsWith('```')) cleaned = cleaned.replace(/^```/, '');
-    
-    if (cleaned.endsWith('```')) cleaned = cleaned.replace(/```$/, '');
-    
-    return JSON.parse(cleaned.trim());
+    return JSON.parse(content);
 }
 
 function validateQuizData(data, expectedCount) {
-    if (!data || !Array.isArray(data.questions)) return false;
+    if (!data || !data.quizTitle || !Array.isArray(data.questions)) return false;
     if (data.questions.length !== expectedCount) return false;
-    
-    for (let q of data.questions) {
-        if (!q.question || !Array.isArray(q.options) || q.options.length !== 4) return false;
-        if (typeof q.correctAnswer !== 'number' || q.correctAnswer < 0 || q.correctAnswer > 3) return false;
-        if (!q.explanation) return false;
-    }
-    return true;
+
+    return data.questions.every(q => {
+        return q.question && 
+               Array.isArray(q.options) && 
+               q.options.length === 4 && 
+               typeof q.answer === 'number' && 
+               q.answer >= 0 && q.answer <= 3 &&
+               q.explanation;
+    });
 }
 
-// ==========================================
-// QUIZ LOGIC
-// ==========================================
-function startQuiz() {
+// =======================================================================
+// QUIZ UI & LOGIC
+// =======================================================================
+
+function initializeQuiz(data) {
+    quizState.title = data.quizTitle;
+    quizState.questions = data.questions;
+    quizState.currentIndex = 0;
+    quizState.score = 0;
+    quizState.userAnswers = [];
+
+    document.getElementById('quiz-title').innerText = quizState.title;
     switchScreen('quiz');
-    renderQuestion();
+    displayQuestion();
 }
 
-function renderQuestion() {
-    const qData = quizData.questions[currentQuestionIndex];
-    const totalQ = quizData.questions.length;
-
-    // Progress updating
-    progressText.textContent = `QUESTION ${currentQuestionIndex + 1} / ${totalQ}`;
-    const percent = ((currentQuestionIndex) / totalQ) * 100;
-    progressBar.style.width = `${percent}%`;
-
-    // Question content
-    const qNumStr = (currentQuestionIndex + 1).toString().padStart(2, '0');
-    questionText.innerHTML = `<span style="color: var(--blue)">Q${qNumStr}.</span> ${qData.question}`;
+function displayQuestion() {
+    const qData = quizState.questions[quizState.currentIndex];
     
-    // Options rendering
+    // Update Header & Progress
+    document.getElementById('question-tracker').innerText = `Question ${quizState.currentIndex + 1} of ${quizState.questions.length}`;
+    const progressPercent = ((quizState.currentIndex) / quizState.questions.length) * 100;
+    document.getElementById('progress-bar').style.width = `${progressPercent}%`;
+    
+    // Render Question
+    document.getElementById('question-text').innerText = qData.question;
+    
+    // Render Options
     optionsContainer.innerHTML = '';
-    const labels = ['A', 'B', 'C', 'D'];
+    const letters = ['A', 'B', 'C', 'D'];
     
-    qData.options.forEach((opt, index) => {
+    qData.options.forEach((option, index) => {
         const btn = document.createElement('button');
-        btn.className = 'brutal-btn option-btn';
-        if (userAnswers[currentQuestionIndex] === index) {
-            btn.classList.add('selected');
-        }
-        btn.innerHTML = `[ ${labels[index]} ] &nbsp; ${opt}`;
-        btn.onclick = () => selectAnswer(index);
+        btn.className = 'option-btn';
+        btn.innerHTML = `<strong>${letters[index]}.</strong> ${option}`;
+        btn.onclick = () => selectAnswer(index, btn);
         optionsContainer.appendChild(btn);
     });
 
-    // Nav Buttons logic
-    btnPrev.disabled = currentQuestionIndex === 0;
+    // Reset Footer
+    explanationText.classList.add('hidden');
+    nextBtn.classList.add('hidden');
     
-    if (currentQuestionIndex === totalQ - 1) {
-        btnNext.classList.add('hidden');
-        btnSubmit.classList.remove('hidden');
+    // Update button text if it's the last question
+    if (quizState.currentIndex === quizState.questions.length - 1) {
+        nextBtn.innerText = "Finish Quiz";
     } else {
-        btnNext.classList.remove('hidden');
-        btnSubmit.classList.add('hidden');
+        nextBtn.innerHTML = "Next Question &rarr;";
     }
 }
 
-function selectAnswer(index) {
-    userAnswers[currentQuestionIndex] = index;
-    renderQuestion(); // Re-render to show selected state
-}
+function selectAnswer(selectedIndex, selectedBtn) {
+    const qData = quizState.questions[quizState.currentIndex];
+    const isCorrect = (selectedIndex === qData.answer);
+    
+    // Lock all buttons
+    const allBtns = optionsContainer.querySelectorAll('.option-btn');
+    allBtns.forEach(btn => btn.disabled = true);
 
-function previousQuestion() {
-    if (currentQuestionIndex > 0) {
-        currentQuestionIndex--;
-        renderQuestion();
+    // Track Answer
+    quizState.userAnswers.push({
+        question: qData.question,
+        userAnswer: qData.options[selectedIndex],
+        correctAnswer: qData.options[qData.answer],
+        isCorrect: isCorrect,
+        explanation: qData.explanation
+    });
+
+    // Visual Feedback
+    if (isCorrect) {
+        selectedBtn.classList.add('selected-correct');
+        quizState.score++;
+    } else {
+        selectedBtn.classList.add('selected-incorrect');
+        allBtns[qData.answer].classList.add('reveal-correct');
     }
+
+    // Show Explanation & Next Button
+    explanationText.innerHTML = `<strong>Explanation:</strong> ${qData.explanation}`;
+    explanationText.classList.remove('hidden');
+    nextBtn.classList.remove('hidden');
 }
 
 function nextQuestion() {
-    if (currentQuestionIndex < quizData.questions.length - 1) {
-        currentQuestionIndex++;
-        renderQuestion();
-    }
-}
-
-// ==========================================
-// RESULTS & REVIEW
-// ==========================================
-function submitQuiz() {
-    const total = quizData.questions.length;
+    quizState.currentIndex++;
     
-    // Ensure all questions are answered
-    const unanswered = userAnswers.filter(a => a === undefined).length;
-    if (unanswered > 0) {
-        alert(`You have ${unanswered} unanswered question(s).`);
-    }
-
-    progressBar.style.width = `100%`; // Finish progress bar visually
-
-    let correctCount = 0;
-    quizData.questions.forEach((q, index) => {
-        if (userAnswers[index] === q.correctAnswer) {
-            correctCount++;
-        }
-    });
-
-    showResults(correctCount, total);
-}
-
-function showResults(correct, total) {
-    switchScreen('results');
-    
-    const percentage = Math.round((correct / total) * 100);
-    scorePercentage.textContent = `${percentage}%`;
-    scoreFraction.textContent = `${correct} / ${total}`;
-    statCorrect.textContent = correct;
-    statWrong.textContent = total - correct;
-
-    // Set Performance Message & Colors
-    if (percentage >= 90) {
-        scoreMessage.textContent = "EXCELLENT WORK!";
-        scorePercentage.style.color = "var(--green)";
-    } else if (percentage >= 70) {
-        scoreMessage.textContent = "GREAT JOB!";
-        scorePercentage.style.color = "var(--blue)";
-    } else if (percentage >= 50) {
-        scoreMessage.textContent = "KEEP PRACTICING!";
-        scorePercentage.style.color = "var(--yellow)";
+    if (quizState.currentIndex < quizState.questions.length) {
+        displayQuestion();
     } else {
-        scoreMessage.textContent = "BACK TO LEARNING!";
-        scorePercentage.style.color = "var(--red)";
+        // Complete Progress Bar before moving
+        document.getElementById('progress-bar').style.width = `100%`;
+        setTimeout(showResults, 300);
     }
-
-    renderReview();
 }
 
-function renderReview() {
+// =======================================================================
+// RESULTS & RESET
+// =======================================================================
+
+function showResults() {
+    switchScreen('result');
+    
+    const total = quizState.questions.length;
+    const score = quizState.score;
+    const percentage = Math.round((score / total) * 100);
+    
+    // Update Score Circle & UI
+    document.getElementById('score-percentage').innerText = `${percentage}%`;
+    document.getElementById('score-text').innerText = `${score} / ${total}`;
+    
+    const circle = document.querySelector('.score-circle');
+    circle.style.background = `conic-gradient(var(--primary-color) ${percentage}%, rgba(255,255,255,0.1) 0%)`;
+
+    // Dynamic Message
+    let msg = "Keep practicing!";
+    if (percentage >= 90) msg = "Excellent work!";
+    else if (percentage >= 70) msg = "Great job!";
+    else if (percentage >= 50) msg = "Good effort!";
+    document.getElementById('performance-msg').innerText = msg;
+
+    // Render Review List
+    const reviewContainer = document.getElementById('review-container');
     reviewContainer.innerHTML = '';
     
-    quizData.questions.forEach((q, index) => {
-        const userAnsIndex = userAnswers[index];
-        const isCorrect = userAnsIndex === q.correctAnswer;
-        const qNumStr = (index + 1).toString().padStart(2, '0');
+    quizState.userAnswers.forEach((ans, idx) => {
+        const item = document.createElement('div');
+        item.className = `review-item ${ans.isCorrect ? 'rev-correct' : 'rev-incorrect'}`;
         
-        const card = document.createElement('div');
-        card.className = 'review-card';
-        
-        const userAnsText = userAnsIndex !== undefined ? q.options[userAnsIndex] : 'No answer provided';
-        const correctAnsText = q.options[q.correctAnswer];
-        
-        card.innerHTML = `
-            <div class="review-q">${qNumStr}. ${q.question}</div>
-            <div class="review-row">Your Answer: <span>${userAnsText}</span></div>
-            <div class="review-row">Correct Answer: <span>${correctAnsText}</span></div>
-            ${isCorrect 
-                ? `<div class="review-correct-mark">&check; Correct</div>` 
-                : `<div class="review-wrong-mark">&cross; Incorrect</div>`
-            }
-            <div class="review-explanation"><strong>Explanation:</strong> ${q.explanation}</div>
+        item.innerHTML = `
+            <h4>Q${idx + 1}. ${ans.question}</h4>
+            <div class="ans-row">Your Answer: <span class="ans-val">${ans.userAnswer}</span></div>
+            ${!ans.isCorrect ? `<div class="ans-row">Correct Answer: <span class="ans-val">${ans.correctAnswer}</span></div>` : ''}
+            <div class="review-status ${ans.isCorrect ? 'status-c' : 'status-i'}">
+                ${ans.isCorrect ? '✓ Correct' : '✗ Incorrect'}
+            </div>
+            <div class="review-exp">${ans.explanation}</div>
         `;
-        
-        reviewContainer.appendChild(card);
+        reviewContainer.appendChild(item);
     });
 }
 
-// ==========================================
-// RESET & RESTART
-// ==========================================
-function resetQuiz() {
-    currentQuestionIndex = 0;
-    userAnswers = new Array(quizData.questions.length).fill(undefined);
-    startQuiz();
+function restartQuiz() {
+    // Reset Form
+    document.getElementById('topic').value = '';
+    switchScreen('setup');
 }
 
-function newQuiz() {
-    quizData = null;
-    currentQuestionIndex = 0;
-    userAnswers = [];
-    inputTopic.value = '';
-    switchScreen('setup');
+// =======================================================================
+// UTILITIES
+// =======================================================================
+
+function switchScreen(activeScreenId) {
+    Object.values(screens).forEach(screen => {
+        screen.classList.remove('active');
+        screen.classList.add('hidden');
+    });
+    screens[activeScreenId].classList.remove('hidden');
+    screens[activeScreenId].classList.add('active');
+}
+
+function showError(msg) {
+    errorMessage.innerText = msg;
+    errorToast.classList.remove('hidden');
+    setTimeout(hideError, 6000);
+}
+
+function hideError() {
+    errorToast.classList.add('hidden');
 }
