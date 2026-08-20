@@ -3,128 +3,120 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>QUIZ//AI</title>
+    <title>AI Quiz Maker</title>
     <link rel="stylesheet" href="style.css">
+    <!-- Google Fonts for Modern Typography -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
 </head>
 <body>
+    <!-- Ambient Background Elements -->
+    <div class="bg-shape shape-1"></div>
+    <div class="bg-shape shape-2"></div>
+    <div class="bg-shape shape-3"></div>
 
-    <main class="app-container">
-        
-        <!-- SETUP SCREEN -->
-        <section id="setup-screen" class="screen active">
-            <header class="hero-header">
-                <h1 class="brand-title">QUIZ//AI</h1>
-                <p class="brand-subtitle">GENERATE. ATTEMPT. LEARN.</p>
+    <main class="container">
+        <!-- Error Toast Notification -->
+        <div id="error-toast" class="glass hidden">
+            <span class="icon">⚠️</span>
+            <p id="error-message">Something went wrong.</p>
+            <button id="close-error">&times;</button>
+        </div>
+
+        <!-- 1. Setup Screen -->
+        <section id="setup-screen" class="glass panel active">
+            <header>
+                <h1>AI Quiz Maker</h1>
+                <p class="subtitle">Create personalized quizzes powered by AI</p>
+                <div class="badge">✨ Powered by Groq AI</div>
             </header>
-
-            <div class="brutal-card">
-                <div class="input-group">
-                    <label for="topic">TOPIC</label>
-                    <input type="text" id="topic" placeholder="e.g. JavaScript, Physics, World History...">
+            
+            <form id="setup-form">
+                <div class="form-group">
+                    <label for="topic">Topic</label>
+                    <input type="text" id="topic" placeholder="Enter quiz topic... (e.g., JavaScript, World History)" required>
                 </div>
-
-                <div class="input-row">
-                    <div class="input-group">
-                        <label for="difficulty">DIFFICULTY</label>
-                        <select id="difficulty">
-                            <option value="Easy">EASY</option>
-                            <option value="Medium" selected>MEDIUM</option>
-                            <option value="Hard">HARD</option>
-                            <option value="Expert">EXPERT</option>
-                        </select>
-                    </div>
-
-                    <div class="input-group">
-                        <label for="questionCount">QUESTIONS</label>
-                        <select id="questionCount">
+                
+                <div class="form-row">
+                    <div class="form-group">
+                        <label for="num-questions">Number of Questions</label>
+                        <select id="num-questions">
                             <option value="5">5</option>
                             <option value="10" selected>10</option>
                             <option value="15">15</option>
                             <option value="20">20</option>
                         </select>
                     </div>
-                </div>
-
-                <button id="btn-generate" class="primary-btn brutal-btn">GENERATE QUIZ &rarr;</button>
-                <p class="api-note">Powered by Groq &bull; GPT-OSS-120B</p>
-            </div>
-        </section>
-
-        <!-- LOADING SCREEN -->
-        <section id="loading-screen" class="screen">
-            <div class="brutal-card text-center loading-box">
-                <h2>GENERATING QUIZ...</h2>
-                <p class="blink">AI IS THINKING.</p>
-                <div class="fake-progress">
-                    <div class="fake-bar"></div>
-                </div>
-            </div>
-        </section>
-
-        <!-- ERROR SCREEN -->
-        <section id="error-screen" class="screen">
-            <div class="brutal-card error-card">
-                <h2>ERROR!</h2>
-                <p id="error-message">Unable to generate the quiz.</p>
-                <button id="btn-error-back" class="brutal-btn">&larr; BACK TO SETUP</button>
-            </div>
-        </section>
-
-        <!-- QUIZ SCREEN -->
-        <section id="quiz-screen" class="screen">
-            <header class="quiz-header">
-                <h2>AI QUIZ</h2>
-                <div class="progress-container">
-                    <span id="progress-text">QUESTION 1 / 10</span>
-                    <div class="progress-track">
-                        <div id="progress-bar" class="progress-fill"></div>
+                    
+                    <div class="form-group">
+                        <label for="difficulty">Difficulty</label>
+                        <select id="difficulty">
+                            <option value="Easy">Easy</option>
+                            <option value="Medium" selected>Medium</option>
+                            <option value="Hard">Hard</option>
+                        </select>
                     </div>
                 </div>
-            </header>
+                
+                <button type="submit" id="generate-btn" class="btn-primary">Generate Quiz</button>
+            </form>
+        </section>
 
-            <div class="brutal-card question-card">
-                <h3 id="question-text" class="question-title">Question goes here?</h3>
+        <!-- 2. Loading Screen -->
+        <section id="loading-screen" class="glass panel hidden text-center">
+            <div class="loader-container">
+                <div class="spinner"></div>
+            </div>
+            <h2>✨ Creating your quiz...</h2>
+            <p class="subtitle">AI is preparing challenging questions for you.</p>
+        </section>
+
+        <!-- 3. Quiz Screen -->
+        <section id="quiz-screen" class="glass panel hidden">
+            <header class="quiz-header">
+                <h3 id="quiz-title">Quiz Title</h3>
+                <span id="question-tracker" class="badge">Question 1 of 10</span>
+            </header>
+            
+            <div class="progress-bar-container">
+                <div id="progress-bar" class="progress-bar"></div>
+            </div>
+            
+            <div class="question-container">
+                <h2 id="question-text">Question text goes here?</h2>
                 <div id="options-container" class="options-grid">
                     <!-- Options injected via JS -->
                 </div>
             </div>
-
-            <nav class="quiz-nav">
-                <button id="btn-prev" class="brutal-btn">&larr; PREVIOUS</button>
-                <button id="btn-next" class="brutal-btn">NEXT &rarr;</button>
-                <button id="btn-submit" class="brutal-btn primary-btn hidden">SUBMIT QUIZ &rarr;</button>
-            </nav>
+            
+            <div class="action-footer">
+                <p id="explanation-text" class="explanation hidden"></p>
+                <button id="next-btn" class="btn-primary hidden">Next Question &rarr;</button>
+            </div>
         </section>
 
-        <!-- RESULT SCREEN -->
-        <section id="results-screen" class="screen">
-            <div class="brutal-card result-summary text-center">
-                <h2 class="result-title">QUIZ COMPLETE!</h2>
-                <h1 id="score-percentage" class="score-huge">0%</h1>
-                <h3 id="score-fraction" class="score-fraction">0 / 0</h3>
-                <h4 id="score-message" class="score-message">MESSAGE</h4>
-                
-                <div class="score-stats">
-                    <div class="stat correct-stat">&check; CORRECT <span id="stat-correct">0</span></div>
-                    <div class="stat wrong-stat">&cross; WRONG <span id="stat-wrong">0</span></div>
+        <!-- 4. Result Screen -->
+        <section id="result-screen" class="glass panel hidden">
+            <header class="result-header text-center">
+                <h2>Quiz Completed!</h2>
+                <div class="score-circle">
+                    <span id="score-percentage">0%</span>
                 </div>
-
-                <div class="result-actions">
-                    <button id="btn-retake" class="brutal-btn">RETAKE QUIZ</button>
-                    <button id="btn-new" class="brutal-btn primary-btn">NEW QUIZ</button>
-                </div>
-            </div>
-
+                <h3 id="score-text">0 / 10</h3>
+                <p id="performance-msg" class="subtitle">Great job!</p>
+            </header>
+            
             <div class="review-section">
-                <h3>ANSWER REVIEW</h3>
+                <h3>Question Review</h3>
                 <div id="review-container">
-                    <!-- Review cards injected via JS -->
+                    <!-- Reviews injected via JS -->
                 </div>
             </div>
+            
+            <button id="restart-btn" class="btn-primary full-width mt-2">Create Another Quiz</button>
         </section>
-
     </main>
-
     <script src="script.js"></script>
 </body>
 </html>
